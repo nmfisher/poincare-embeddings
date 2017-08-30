@@ -31,7 +31,8 @@ int main(int narg, char** argv)
   std::string data_file = args.data_file;
   std::string result_embedding_file = args.result_embedding_file;
 
-  Matrix<real> embeddings;
+  Matrix<real> w_v;
+  Matrix<real> w_u;
   std::vector<std::pair<std::size_t, std::size_t> > data;
   Dictionary<std::string> dict;
   Config<real> config;
@@ -69,7 +70,7 @@ int main(int narg, char** argv)
   std::cout << "Done : " << dict.size() << " unique tokens." << std::endl;
 
   std::cout << "Starting training..." << std::endl;
-  ret = poincare_embedding<real>(data_file, embeddings, dict, config);
+  ret = poincare_embedding<real>(data_file, w_u, w_v, dict, config);
 
   if(!ret){
     std::cerr << "training failed" << std::endl;

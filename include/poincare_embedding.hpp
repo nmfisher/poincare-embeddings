@@ -17,17 +17,20 @@
 #include "arguments.hpp"
 #include "dictionary.hpp"
 #include "initializer.hpp"
+
+constexpr float EPS = 1e-6;
+
 #include "vector.hpp"
 #include "matrix.hpp"
+#include "utils.hpp"
 
 #define LEFT_SAMPLING 0
 #define RIGHT_SAMPLING 1
 #define BOTH_SAMPLING 2
 #define SAMPLING_STRATEGY 1
 
-namespace poincare_disc{
+namespace poincare_disc { 
 
-  constexpr float EPS = 1e-6;
 
   ///////////////////////////////////////////////////////////////////////////////////////////
   // Poincare Disc
@@ -56,37 +59,37 @@ namespace poincare_disc{
       uv_ = u_.dot(v_);
       alpha_ = 1 - uu_;
       if(alpha_ <= 0){ alpha_ = EPS; } // TODO: ensure 0 <= uu_ <= 1-EPS;
-      // if(!(alpha_ > 0)){ std::cout << "uu_: " << uu_ << ", alpha_: " << alpha_ << std::endl; }
-      // assert(alpha_ > 0);
+      
       beta_ = 1 - vv_;
       if(beta_ <= 0){ beta_ = EPS; } // TODO: ensure 0 <= vv_ <= 1-EPS;
-      // if(!(beta_ > 0)){ std::cout << "vv_: " << vv_ << ", beta_: " << beta_ << std::endl; }
-      // assert(beta_ > 0);
+      
       gamma_ = 1 + 2 * (uu_ - 2 * uv_ + vv_) / alpha_ / beta_;
       if(gamma_ < 1.){ gamma_ = 1.; } // for nemerical error
       assert(gamma_ >= 1);
       return arcosh<real>(gamma_);
     }
 
-    void backward(Vector<real>& grad_u, Vector<real>& grad_v, real grad_output)
+    
+    // partial Euclidean derivative of dist(u,v) wrt u = (4  / (beta * sqrt(gamma^2 - 1))) * (((||v||^2 - 2<u,v> + 1)/alpha^2)))*u - v/alpha)
+    // partial Euclidean derivative of dist(u,v) wrt v is the same with alphas/betas swapped
+    // Riemannian derivative is (A * Euclidean derivative),  where A is ((1 - ||x||^2)^2 / 4), the inverse of the Riemannian metric tensor)
+    void backward(Vector<real>& grad_u, Vector<real>& grad_v, real log_loss_grad)
     {
-      real c = grad_output;
+      real c = log_loss_grad;
       if(gamma_ == 1){
         grad_u.zero_();
         grad_v.zero_();
         return;
       }
 
-      c  *= 4 / std::sqrt(gamma_ * gamma_ - 1) / alpha_ / beta_;
+      c *= 1 / std::sqrt(gamma_ * gamma_ - 1) / beta_ / alpha_;
+      real cu = c / alpha_; 
+      real cv = c / beta_;
 
-      // grad for u
-      real cu = c * alpha_ * alpha_ / 4;
-      real cv = c * beta_ * beta_  / 4;
-
-      grad_u.assign_(cu * (vv_ - 2 * uv_ + 1) / alpha_, u_);
+      grad_u.assign_(cu * (vv_ - 2 * uv_ + 1), u_);
       grad_u.add_(-cu, v_);
 
-      grad_v.assign_(cv * (uu_ - 2 * uv_ + 1) / beta_, v_);
+      grad_v.assign_(cv * (uu_ - 2 * uv_ + 1) / beta_ / beta_, v_);
       grad_v.add_(-cv, u_);
     }
 
@@ -146,6 +149,9 @@ namespace poincare_disc{
     std::size_t current_iter_;
     std::size_t total_iter_;
   };
+  
+
+ 
 
   ///////////////////////////////////////////////////////////////////////////////////////////
   // Poincare Embedding
@@ -175,76 +181,12 @@ namespace poincare_disc{
       v.mult_(thresh / std::sqrt(vv));
     }
   }
-  
-  
-  template <class RealType>
-  bool train_line(const std::vector<std::int32_t>& line, 
-                    std::vector<int32_t>& bow, 
-                    Matrix<RealType>& embeddings, 
-                    Vector<RealType>& u,
-                    Vector<RealType>& v,
-                    const Config& config, 
-                    double& avg_loss, 
-                    double&cum_loss, 
-                    size_t thread_no) {
-      
-    for (int32_t w = 0; w < line.size(); w++) {
-        u = embeddings[line[w]];
-        Vector<RealType> v;
-        // generate bow
-        for (int32_t c = -config.ws; c <= config.ws; c++) {
-          if (c != 0 && w + c >= 0 && w + c < line.size()) {
-              v.add(1.0, embeddings[line[w+c])];
-          }
-        }
-        v.mult(1.0 / (2*config.ws))
-                
-        embeddings
-               
-      exp_neg_dist_values[0] = std::exp(-dists[0](embeddings[i], embeddings[j]));
-      for(std::size_t k = 0; k < config.neg_size; ++k){
-        auto i = left_indices[k + 1] = negative_sampler();
-        auto j = right_indices[k + 1] = itr->second;
-        exp_neg_dist_values[k + 1] = std::exp(-dists[k + 1](embeddings[i], embeddings[j]));
-      }
-
-      // compute gradient
-      // grads for 1, 2, ...
-      // at first, compute the grad input
-      real Z = exp_neg_dist_values[0];
-      for(std::size_t k = 0; k < config.neg_size; ++k){
-        Z += exp_neg_dist_values[k + 1];
-      }
-      for(std::size_t k = 0; k < config.neg_size; ++k){
-        dists[k + 1].backward(left_grads[k+1], right_grads[k+1], -exp_neg_dist_values[k+1]/Z);
-      }
-      // grads for 0
-      dists[0].backward(left_grads[0], right_grads[0], 1 - exp_neg_dist_values[0]/Z);
-
-      // add loss
-      {
-        avg_loss -= std::log(exp_neg_dist_values[0]);
-        avg_loss += std::log(Z);
-      }
-
-      // update
-      for(std::size_t k = 0; k < 1 + config.neg_size; ++k){
-        auto i = left_indices[k], j = right_indices[k];
-        embeddings[i].add_clip_(-lr(), left_grads[k]);
-        embeddings[j].add_clip_(-lr(), right_grads[k]);
-      }
-
-      lr.update();
-
-      // next iteration
-      ++itr;
-  }
-  
-
+    
   template <class RealType>
   bool train_thread(const std::string& infile,
-                    Matrix<RealType>& embeddings,
-                    Dictionary<std::string>& dict, 
+                    Matrix<RealType>& w_u,
+                    Matrix<RealType>& w_v,
+                    const Dictionary<std::string>& dict, 
                     const Config<RealType>& config,
                     LinearLearningRate<RealType>& lr,
                     const std::size_t thread_no,
@@ -254,34 +196,52 @@ namespace poincare_disc{
     using real = RealType;
     
     // clip
-    for(std::size_t i = 0, I = embeddings.nrow(); i < I; ++i){
-      clip(embeddings[i]);
+    for(std::size_t i = 0, I = w_u.nrow(); i < I; ++i){
+      clip(w_u[i]);
+      clip(w_v[i]);
     }
 
     // construct negative sampler
+    std::vector<size_t> counts = dict.counts();
     UniformNegativeSampler negative_sampler(counts.begin(), counts.end(), seed);
 
     // data, gradients, distances
     std::vector<std::size_t> left_indices(1 + config.neg_size), right_indices(1 + config.neg_size);
-    Matrix<real> left_grads(1 + config.neg_size, config.dim, ZeroInitializer<real>()); // u
-    Matrix<real> right_grads(1 + config.neg_size, config.dim, ZeroInitializer<real>()); // v, v', ...
+    Matrix<real> grads_u(1 + config.neg_size, config.dim, ZeroInitializer<real>()); 
+    Matrix<real> grads_v(1 + config.neg_size, config.dim, ZeroInitializer<real>()); 
+    
+    // vector to hold the target word embeddings
+    Vector<real> u(config.dim);
+    
+    // vector to hold the average of the context embeddings 
+    Vector<real> v(config.dim);
+    
+    // vector to hold the Poincare ball distances
     std::vector<Distance<real>> dists(1 + config.neg_size);
-    std::vector<real> exp_neg_dist_values(1 + config.neg_size);
+    
+    // negative sampling loss 
+    RealType loss;
     
     // start training
     auto tick = std::chrono::system_clock::now();
     auto start_time = tick;
     constexpr std::size_t progress_interval = 10000;
+    
     double avg_loss = 0;
     double cum_loss = 0;
     
     std::ifstream ifs(infile);
-    utils::seek(ifs, threadId * utils::size(ifs) / config.num_threads);
+        
+    size_t start = thread_no * size(ifs) / config.num_threads;
+    size_t end = std::min<unsigned long>((thread_no + 1) * size(ifs) / config.num_threads, size(ifs));
+    seek(ifs, start);
     int64_t localTokenCount = 0;
     std::vector<int32_t> line;
-    std::vector<int32_t> bow;
+    std::vector<int32_t> bow;  
+
+    std::cout << "." << std::endl;    
     
-    while (localTokenCount < token_count_per_thread) {
+    while (ifs.tellg() < end) {
         if(thread_no == 0 && localTokenCount % progress_interval == 0){
             auto tack = std::chrono::system_clock::now();
             auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
@@ -299,8 +259,45 @@ namespace poincare_disc{
         }
           
         dict.getLine(ifs, line);
-        
-        localTokenCount += train_line(line, bow, dists, exp_neg_dist_values, config, avg_loss, cum_loss, thread_no); 
+               
+        for (int32_t w = 0; w < line.size(); w++) {
+            loss = 0;
+            localTokenCount++;
+            
+            u = w_u[line[w]];
+            v.zero_();
+            // generate bow
+            for (int32_t c = -config.ws; c <= config.ws; c++) {
+              if (c != 0 && w + c >= 0 && w + c < line.size()) {
+                  v.add_(1.0, w_v[line[w+c]]);
+              }
+            }
+            v.mult_(1.0 / (2*config.ws));
+                        
+            // calculate distances / sigmoids / log loss
+            loss = std::log(1 / (1 + std::exp(-dists[0](u, v))));
+            
+            for(std::size_t k = 1; k < config.neg_size; ++k){
+                loss -= 1 / (1 + std::exp(-dists[k](u, w_v[negative_sampler()])));
+            }
+            
+            loss /= config.neg_size;
+                    
+            // calculate grads
+            for(std::size_t k = 0; k < config.neg_size; ++k){
+                grads_u[k].zero_();
+                grads_v[k].zero_();
+                dists[k].backward(grads_u[k], grads_v[k], loss);
+            }
+
+            // update
+            for(std::size_t k = 0; k < 1 + config.neg_size; ++k){
+                u.add_clip_(-lr(), grads_u[k]);
+                v.add_clip_(-lr(), grads_v[k]); 
+            }
+            lr.update();
+            avg_loss += loss;
+        }
     }
     
     ifs.close();
@@ -311,8 +308,8 @@ namespace poincare_disc{
       auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-start_time).count();
         std::cout << "\r"
                   <<std::setw(5) << std::fixed << std::setprecision(2) << 100 << " %"
-                  << "    " << config.num_threads * total_itr * 1000./millisec << " itr/sec"
-                  << "    " << "loss: " << cum_loss / total_itr
+                  << "    " << config.num_threads * localTokenCount * 1000./millisec << " itr/sec"
+                  << "    " << "loss: " << cum_loss / localTokenCount
                   << std::endl;
     }
     return true;
@@ -320,7 +317,8 @@ namespace poincare_disc{
 
   template <class RealType>
   bool poincare_embedding(const std::string& infile, 
-                          Matrix<RealType>& embeddings,
+                          Matrix<RealType>& w_u,
+                          Matrix<RealType>& w_v,
                           const Dictionary<std::string>& dict,
                           const Config<RealType>& config)
   {
@@ -328,37 +326,36 @@ namespace poincare_disc{
 
     std::default_random_engine engine(config.seed);
 
-    embeddings.init(dict.size(), config.dim, config.initializer);
+    w_u.init(dict.size(), config.dim, config.initializer);
+    w_v.init(dict.size(), config.dim, config.initializer);
 
-    std::cout << "embedding size: " << embeddings.nrow() << " x " << embeddings.ncol() << std::endl;
+    std::cout << "embedding size: " << w_u.nrow() << " x " << w_u.ncol() << std::endl;
 
     // fit
     LinearLearningRate<real> lr(config.lr0, config.lr1, dict.tokenCount() * config.max_epoch);
-    std::vector<std::pair<std::size_t, std::size_t> > fake_pairs(config.neg_size);
     std::cout << "num_threads = " << config.num_threads << std::endl;
     std::size_t data_size_per_thread = dict.tokenCount() / config.num_threads;
     std::cout << "data size = " << data_size_per_thread << "/thread" << std::endl;
 
     for(std::size_t epoch = 0; epoch < config.max_epoch; ++epoch){
       std::cout << "epoch " << epoch+1 << "/" << config.max_epoch << " start" << std::endl;
-
-      if(config.num_threads > 1){
+        
         // multi thread
-
-        std::vector<std::thread> threads;
-        for(std::size_t i = 0; i < config.num_threads; ++i){
-          unsigned int thread_seed = engine();
-          threads.push_back(std::thread( [=, &embeddings, &counts, &lr]{ train_thread(infile, embeddings, dict,                                                                                      config, lr, i, data_size_per_thread, thread_seed); }  ));
-        }
-        for(auto& th : threads){
-          th.join();
-        }
-      }else{
+        if(config.num_threads > 1){
+            std::vector<std::thread> threads;
+            for(std::size_t i = 0; i < config.num_threads; ++i){
+              unsigned int thread_seed = engine();
+              train_thread(infile, w_u, w_v, dict, config, lr, 0, data_size_per_thread, thread_seed);
+              //threads.push_back(std::thread( [=, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed ]{ train_thread(infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed); }  ));
+            }
+            for(auto& th : threads){
+              th.join();
+            }
         // single thread
-        const unsigned int thread_seed = engine();
-        train_thread(embeddings, dict.counts(), data.begin(), data.end(), config, lr, 0, thread_seed);
-      }
-
+        } else{
+            const unsigned int thread_seed = engine();
+            train_thread(infile, w_u, w_v, dict, config, lr, 0, data_size_per_thread, thread_seed);
+        }
     }
 
     return true;
