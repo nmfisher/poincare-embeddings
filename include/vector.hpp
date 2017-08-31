@@ -55,6 +55,7 @@
         Vector<real>& add_clip_(const real c, const Vector<real>& v, const real thresh=1.0-EPS)
         {
           real uu = this->squared_sum(), uv = this->dot(v), vv = v.squared_sum();
+
           real C = uu + 2*c*uv + c*c*vv; // resulting norm
           real scale = 1.0;
           if(C > thresh * thresh){
@@ -62,12 +63,12 @@
           }
           assert( 0 < scale && scale <= 1. );
           if(scale == 1.){
-            for(int i = 0, I = dim(); i < I; ++i){
+            for(int i = 0, I = dim(); i < I; ++i){  
               data_.get()[i] += c * v.data_.get()[i];
             }
           }else{
             for(int i = 0, I = dim(); i < I; ++i){
-              data_.get()[i] = (data_.get()[i] + c * v.data_.get()[i]) * scale;
+                data_.get()[i] = (data_.get()[i] + c * v.data_.get()[i]) * scale;
             }
           }
           assert(this->squared_sum() <= (thresh + EPS) * (thresh+EPS));

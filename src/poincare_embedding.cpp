@@ -43,6 +43,7 @@ int main(int narg, char** argv)
   config.dim = args.dim;
   config.lr0 = args.lr0;
   config.lr1 = args.lr1;
+  config.ws = args.ws;
   config.initializer = UniformInitializer<real>(-args.uniform_range, args.uniform_range);
 
   std::cout << "settings:" << "\n"
@@ -51,6 +52,7 @@ int main(int narg, char** argv)
             << "  " << "seed                  : " << config.seed << "\n"
             << "  " << "num_threads           : " << config.num_threads << "\n"
             << "  " << "neg_size              : " << config.neg_size << "\n"
+            << "  " << "ws                    : " << config.ws << "\n"
             << "  " << "max_epoch             : " << config.max_epoch << "\n"
             << "  " << "dim                   : " << config.dim << "\n"
             << "  " << "lr0                   : " << config.lr0 << "\n"
@@ -77,8 +79,8 @@ int main(int narg, char** argv)
     exit(1);
   }
 
-  // std::cout << "save to " << result_embedding_file << std::endl;
-  // save(result_embedding_file, embeddings, dict);
+  std::cout << "save to " << result_embedding_file << std::endl;
+  save(result_embedding_file, w_v, dict);
 
   return 0;
 }

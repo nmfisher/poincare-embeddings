@@ -8,13 +8,15 @@ struct Arguments
   std::string result_embedding_file = "embeddings.csv";
   unsigned int seed = 0;
   std::size_t num_threads = 1;
-  std::size_t neg_size = 10;
+  std::size_t neg_size = 5;
+  std::size_t ws = 5;
   std::size_t max_epoch = 1;
   std::size_t dim = 50;
   real uniform_range = 0.001;
   real lr0 = 0.01;
   real lr1 = 0.0001;
   bool verbose = true;
+  
 };
 
 Arguments parse_args(int narg, char** argv)
@@ -77,6 +79,12 @@ Arguments parse_args(int narg, char** argv)
       double x = std::stod(arg);
       if( x <= 0 ){ goto HELP; }
       result.uniform_range = static_cast<real>(x);
+      continue;
+    }else if(arg == "-w" || arg == "--window_size"){
+      arg = argv[++i];
+      int x = std::stod(arg);
+      if( x <= 0 ){ goto HELP; }
+      result.ws = static_cast<int>(x);
       continue;
     }else if(arg == "-h" || arg == "--help"){
       goto HELP;

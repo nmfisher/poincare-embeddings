@@ -7,6 +7,7 @@
     const std::string EOS = "</s>";
     const std::string BOW = "<";
     const std::string EOW = ">";
+    const std::size_t MAX_LINE_SIZE = 1024;
     
   template <class KeyType>
   struct Dictionary
@@ -37,11 +38,11 @@
         return n;
     }
     
-    std::size_t get_hash(const key_type& key) {
-        if(!this->find(key)) {
-            this->put(key);
+    std::size_t* get_hash(const key_type& key) {
+        if(this->find(key)) {
+            return &hash_.find(key)->second;          
         } 
-        return hash_.find(key)->second;      
+        return nullptr;
     }
     
     key_type get_key(const std::size_t i) const { return keys_[i]; }
@@ -52,54 +53,47 @@
     
     const std::size_t& tokenCount() const { return ntokens_; } 
     
-    const bool readWord(std::istream& in, std::string& word) 
+    const bool readWord(std::ifstream& ifs, std::string& word) 
     {
         char c;
-        std::streambuf& sb = *in.rdbuf();
         word.clear();
-        
-        while ((c = sb.sbumpc()) != std::char_traits<wchar_t>::eof()) {
+        std::streambuf& sb = *ifs.rdbuf();
+        while ((c = sb.sbumpc()) != EOF) {
             if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\v' ||
                 c == '\f' || c == '\0') {
-                if (word.empty()) {
-                    if (c == '\n') {
-                        word += EOS;
-                        return true;
-                    }
-                    continue;
-                } else {
-                    if (c == '\n')
-                        sb.sungetc();
-                    return true;
+              if (word.empty()) {
+                if (c == '\n') {
+                  word += EOS;
+                  return true;
                 }
+                continue;
+              } else {
+                if (c == '\n')
+                  sb.sungetc();
+                return true;
+              }
             }
             word.push_back(c);
-        }
-        // trigger eofbit
-        in.get();
+          }
+          // trigger eofbit
         return !word.empty();
     }
 
-    const int32_t getLine(std::istream& in, std::vector<int32_t>& words) {
+    const int32_t getLine(std::ifstream& ifs, std::vector<int32_t>& words) {
         std::uniform_real_distribution<> uniform(0, 1);
-        
-        if (in.eof()) {
-            in.clear();
-            in.seekg(std::streampos(0));
-        }
 
         words.clear();
         int32_t ntokens = 0;
         std::string token;
-        while (this->readWord(in, token)) {
-            size_t wid = get_hash(token);
-            ntokens++;
-            words.push_back(wid);       
-            if (token == EOS) break;
+        while (this->readWord(ifs, token) && token != EOS) {
+            size_t* wid = get_hash(token);
+            if(wid) {
+                ntokens++;
+                words.push_back(*wid);       
+            }
         }
         return ntokens;
     }
-
     
   private:
     std::unordered_map<key_type, std::size_t> hash_;
@@ -110,15 +104,15 @@
   
     inline bool build_dict(Dictionary<std::string>& dict, const std::string& filename, const Arguments& args)
     {
-        std::ifstream fin(filename.c_str());
-        if(!fin || !fin.good()){
+        std::ifstream ifs(filename.c_str());
+        if(!ifs || !ifs.good()){
           std::cerr << "cannot read file: " << filename << std::endl;
           return false;
         }
-
+        
         std::string word;
         size_t ntokens_ = 0;
-        while (dict.readWord(fin, word)) {
+        while (dict.readWord(ifs, word)) {
             dict.put(word);
             if (ntokens_ % 1000000 == 0 && args.verbose == true) {
                 std::cerr << "\rRead " << ntokens_  / 1000000 << "M words" << std::flush;
@@ -126,7 +120,7 @@
             ++ntokens_;
         }
 
-        fin.close();
+        ifs.close();
 
         std::cerr << std::endl;
 

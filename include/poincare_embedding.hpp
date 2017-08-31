@@ -52,11 +52,13 @@ namespace poincare_disc {
     Distance(): u_(), v_(), uu_(), vv_(), uv_(), alpha_(), beta_(), gamma_() {}
     real operator()(const Vector<real>& u, const Vector<real>& v)
     {
+      
       u_ = u;
       v_ = v;
       uu_ = u_.squared_sum();
-      vv_ = v_.squared_sum();
+      vv_ = v_.squared_sum();      
       uv_ = u_.dot(v_);
+      
       alpha_ = 1 - uu_;
       if(alpha_ <= 0){ alpha_ = EPS; } // TODO: ensure 0 <= uu_ <= 1-EPS;
       
@@ -64,6 +66,7 @@ namespace poincare_disc {
       if(beta_ <= 0){ beta_ = EPS; } // TODO: ensure 0 <= vv_ <= 1-EPS;
       
       gamma_ = 1 + 2 * (uu_ - 2 * uv_ + vv_) / alpha_ / beta_;
+      
       if(gamma_ < 1.){ gamma_ = 1.; } // for nemerical error
       assert(gamma_ >= 1);
       return arcosh<real>(gamma_);
@@ -76,6 +79,7 @@ namespace poincare_disc {
     void backward(Vector<real>& grad_u, Vector<real>& grad_v, real log_loss_grad)
     {
       real c = log_loss_grad;
+      
       if(gamma_ == 1){
         grad_u.zero_();
         grad_v.zero_();
@@ -85,12 +89,13 @@ namespace poincare_disc {
       c *= 1 / std::sqrt(gamma_ * gamma_ - 1) / beta_ / alpha_;
       real cu = c / alpha_; 
       real cv = c / beta_;
-
+  
       grad_u.assign_(cu * (vv_ - 2 * uv_ + 1), u_);
       grad_u.add_(-cu, v_);
 
       grad_v.assign_(cv * (uu_ - 2 * uv_ + 1) / beta_ / beta_, v_);
       grad_v.add_(-cv, u_);
+      
     }
 
   private:
@@ -161,16 +166,16 @@ namespace poincare_disc {
   struct Config
   {
     using real = RealType;
-    std::size_t dim = 5; // dimension
+    std::size_t dim; // dimension
     unsigned int seed = 0; // seed
     UniformInitializer<real> initializer = UniformInitializer<real>(-0.0001, 0.0001); // embedding initializer
     std::size_t num_threads = 1;
-    std::size_t neg_size = 5;
-    std::size_t max_epoch = 1;
+    std::size_t neg_size;
+    std::size_t max_epoch;
     char delim = '\t';
     real lr0 = 0.01; // learning rate
     real lr1 = 0.0001; // learning rate
-    std::size_t ws = 5;
+    int32_t ws;
   };
 
   template <class RealType>
@@ -227,7 +232,7 @@ namespace poincare_disc {
     // start training
     auto tick = std::chrono::system_clock::now();
     auto start_time = tick;
-    constexpr std::size_t progress_interval = 10000;
+    constexpr std::size_t progress_interval = 1000;
     
     double avg_loss = 0;
     double cum_loss = 0;
@@ -235,54 +240,65 @@ namespace poincare_disc {
     std::ifstream ifs(infile);
         
     size_t start = thread_no * size(ifs) / config.num_threads;
-    size_t end = std::min<unsigned long>((thread_no + 1) * size(ifs) / config.num_threads, size(ifs) - token_count_per_thread);
+    size_t end = (thread_no + 1) * size(ifs) / config.num_threads;
     seek(ifs, start);
     int64_t localTokenCount = 0;
     std::vector<int32_t> line;
-    std::vector<int32_t> bow;  
+    std::vector<int32_t> bow;
+    std::string token;
+        
+    while (ifs.tellg() < end) {        
     
-    while (ifs.tellg() < end) {
-        if(thread_no == 0 && localTokenCount % progress_interval == 0){
-            auto tack = std::chrono::system_clock::now();
-            auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
-            tick = tack;
-            double percent = (100.0 * localTokenCount) / token_count_per_thread ;
-            cum_loss += avg_loss;
-            std::cout << "\r"
-                      <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
-                      << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec"
-                      << "    " << "loss: " << cum_loss / localTokenCount
-                      << std::flush;
-
-            avg_loss = 0;
-        }
-
         dict.getLine(ifs, line);
-               
+                
         for (int32_t w = 0; w < line.size(); w++) {
             
-            loss = 0;
             localTokenCount++;
+            if(thread_no == 0 && localTokenCount % progress_interval == 0){
+                auto tack = std::chrono::system_clock::now();
+                auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
+                tick = tack;
+                double percent = 100.0 * localTokenCount / token_count_per_thread;
+                cum_loss += avg_loss;
+                std::cout << "\r"
+                          <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
+                          << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec/thread"
+                          << "    " << "loss: " << avg_loss / progress_interval
+                          << "    " << "lr: " << lr()
+                          << "    " << "epoch: " << epoch << " / " << config.max_epoch 
+                          << std::flush;
+
+                avg_loss = 0;
+            }
             
-            u = w_u[line[w]];
+            loss = 0;
+            
+            u.assign_(1.0, w_u[line[w]]);
             v.zero_();
+            
+            bow.clear();
+            
             // generate bow
             for (int32_t c = -config.ws; c <= config.ws; c++) {
               if (c != 0 && w + c >= 0 && w + c < line.size()) {
                   v.add_(1.0, w_v[line[w+c]]);
+                  bow.push_back(line[w+c]);
               }
             }
-            v.mult_(1.0 / (2*config.ws));
             
-            std::cout <<std::setw(5) << std::fixed << std::setprecision(5) << "U" << thread_no << ": " << u << std::endl;
-            std::cout <<std::setw(5) << std::fixed << std::setprecision(5) << "V" << thread_no << ": " << v << std::endl;
-                                    
+            if(bow.size() == 0) {
+                continue;
+            }
+            
+            v.mult_(1.0 / bow.size());
+                                                            
             // calculate distances / sigmoids / log loss
             loss = std::log(1 / (1 + std::exp(-dists[0](u, v))));
-                        
+                                    
             for(std::size_t k = 1; k < config.neg_size; ++k){
                 loss += 1 / (1 + std::exp(-dists[k](u, w_v[negative_sampler()])));
             }
+
             
             loss /= config.neg_size;
                                 
@@ -292,29 +308,40 @@ namespace poincare_disc {
                 grads_v[k].zero_();
                 dists[k].backward(grads_u[k], grads_v[k], loss);
             }
-
+    
             // update
-            for(std::size_t k = 0; k < 1 + config.neg_size; ++k){
-                u.add_clip_(-lr(), grads_u[k]);
-                v.add_clip_(-lr(), grads_v[k]); 
-            }
+            for(std::size_t k = 0; k < config.neg_size; ++k){
+                w_u[line[w]].add_clip_(-lr(), grads_u[k]);
+                for(std::size_t j = 0; j < bow.size(); ++j) {
+                    w_v[bow[j]].add_clip_(-lr(), grads_v[k]); 
+                }
+            }            
+            
             lr.update();
             avg_loss += loss;
+            
         }
     }
     
+    if(thread_no == 0){
+            auto tack = std::chrono::system_clock::now();
+            auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
+            tick = tack;
+            double percent = 100.0 * localTokenCount / token_count_per_thread;
+            cum_loss += avg_loss;
+            std::cout << "\r"
+                      <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
+                      << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec/thread"
+                      << "    " << "loss: " << avg_loss / progress_interval
+                      << "    " << "lr: " << lr()
+                      << "    " << "epoch: " << epoch << " / " << config.max_epoch 
+                      << std::flush;
+
+            avg_loss = 0;
+        }
+    
     ifs.close();
 
-    if(thread_no == 0){
-      cum_loss += avg_loss;
-      auto tack = std::chrono::system_clock::now();
-      auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-start_time).count();
-        std::cout << "\r"
-                  <<std::setw(5) << std::fixed << std::setprecision(2) << 100 << " %"
-                  << "    " << config.num_threads * localTokenCount * 1000./millisec << " itr/sec"
-                  << "    " << "loss: " << cum_loss / localTokenCount
-                  << std::endl;
-    }
     return true;
   }
 
@@ -342,16 +369,16 @@ namespace poincare_disc {
     std::cout << "data size = " << data_size_per_thread << "/thread" << std::endl;
 
     for(std::size_t epoch = 0; epoch < config.max_epoch; ++epoch){
-      
-      std::cout << "epoch " << epoch+1 << "/" << config.max_epoch << " start" << std::endl;
-      
+        
+        std::cout << std::endl;
+            
       const unsigned int thread_seed = engine();
 
         // multi thread
         if(config.num_threads > 1){
             std::vector<std::thread> threads;
             for(std::size_t i = 0; i < config.num_threads; ++i){    
-              threads.push_back(std::thread( [=, infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed, epoch ]() mutable { train_thread(infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed, epoch); }  ));
+              threads.push_back(std::thread( [&infile, &w_u, &w_v, &dict, &config, &lr, i, data_size_per_thread, thread_seed, epoch ]() mutable { train_thread(infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed, epoch); }  ));
             }
             for(auto& th : threads){
               th.join();
