@@ -165,7 +165,7 @@ namespace poincare_disc {
     unsigned int seed = 0; // seed
     UniformInitializer<real> initializer = UniformInitializer<real>(-0.0001, 0.0001); // embedding initializer
     std::size_t num_threads = 1;
-    std::size_t neg_size = 10;
+    std::size_t neg_size = 5;
     std::size_t max_epoch = 1;
     char delim = '\t';
     real lr0 = 0.01; // learning rate
@@ -186,20 +186,22 @@ namespace poincare_disc {
   bool train_thread(const std::string& infile,
                     Matrix<RealType>& w_u,
                     Matrix<RealType>& w_v,
-                    const Dictionary<std::string>& dict, 
+                    Dictionary<std::string>& dict, 
                     const Config<RealType>& config,
                     LinearLearningRate<RealType>& lr,
                     const std::size_t thread_no,
                     const std::size_t token_count_per_thread,
-                    const unsigned int seed)
+                    const unsigned int seed,
+                    const size_t epoch)
   {
     using real = RealType;
-    
+        
     // clip
-    for(std::size_t i = 0, I = w_u.nrow(); i < I; ++i){
-      clip(w_u[i]);
-      clip(w_v[i]);
-    }
+    // for(std::size_t i = 0, I = w_u.nrow(); i < I; ++i){
+      // clip(w_u[i]);
+      // clip(w_v[i]);
+    // }
+
 
     // construct negative sampler
     std::vector<size_t> counts = dict.counts();
@@ -233,34 +235,32 @@ namespace poincare_disc {
     std::ifstream ifs(infile);
         
     size_t start = thread_no * size(ifs) / config.num_threads;
-    size_t end = std::min<unsigned long>((thread_no + 1) * size(ifs) / config.num_threads, size(ifs));
+    size_t end = std::min<unsigned long>((thread_no + 1) * size(ifs) / config.num_threads, size(ifs) - token_count_per_thread);
     seek(ifs, start);
     int64_t localTokenCount = 0;
     std::vector<int32_t> line;
     std::vector<int32_t> bow;  
-
-    std::cout << "." << std::endl;    
     
     while (ifs.tellg() < end) {
         if(thread_no == 0 && localTokenCount % progress_interval == 0){
             auto tack = std::chrono::system_clock::now();
             auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
             tick = tack;
-            double percent = (100.0 * localTokenCount) / token_count_per_thread;
+            double percent = (100.0 * localTokenCount) / token_count_per_thread ;
             cum_loss += avg_loss;
-            avg_loss /= progress_interval;
             std::cout << "\r"
-                      <<std::setw(5) << std::fixed << std::setprecision(2) << percent << " %"
-                      << "    " << config.num_threads * progress_interval*1000./millisec << " itr/sec"
-                      << "    " << "loss: " << avg_loss
+                      <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
+                      << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec"
+                      << "    " << "loss: " << cum_loss / localTokenCount
                       << std::flush;
 
             avg_loss = 0;
         }
-          
+
         dict.getLine(ifs, line);
                
         for (int32_t w = 0; w < line.size(); w++) {
+            
             loss = 0;
             localTokenCount++;
             
@@ -273,16 +273,19 @@ namespace poincare_disc {
               }
             }
             v.mult_(1.0 / (2*config.ws));
-                        
+            
+            std::cout <<std::setw(5) << std::fixed << std::setprecision(5) << "U" << thread_no << ": " << u << std::endl;
+            std::cout <<std::setw(5) << std::fixed << std::setprecision(5) << "V" << thread_no << ": " << v << std::endl;
+                                    
             // calculate distances / sigmoids / log loss
             loss = std::log(1 / (1 + std::exp(-dists[0](u, v))));
-            
+                        
             for(std::size_t k = 1; k < config.neg_size; ++k){
-                loss -= 1 / (1 + std::exp(-dists[k](u, w_v[negative_sampler()])));
+                loss += 1 / (1 + std::exp(-dists[k](u, w_v[negative_sampler()])));
             }
             
             loss /= config.neg_size;
-                    
+                                
             // calculate grads
             for(std::size_t k = 0; k < config.neg_size; ++k){
                 grads_u[k].zero_();
@@ -319,7 +322,7 @@ namespace poincare_disc {
   bool poincare_embedding(const std::string& infile, 
                           Matrix<RealType>& w_u,
                           Matrix<RealType>& w_v,
-                          const Dictionary<std::string>& dict,
+                          Dictionary<std::string>& dict,
                           const Config<RealType>& config)
   {
     using real = RealType;
@@ -328,33 +331,34 @@ namespace poincare_disc {
 
     w_u.init(dict.size(), config.dim, config.initializer);
     w_v.init(dict.size(), config.dim, config.initializer);
-
+    
     std::cout << "embedding size: " << w_u.nrow() << " x " << w_u.ncol() << std::endl;
 
     // fit
     LinearLearningRate<real> lr(config.lr0, config.lr1, dict.tokenCount() * config.max_epoch);
     std::cout << "num_threads = " << config.num_threads << std::endl;
-    std::size_t data_size_per_thread = dict.tokenCount() / config.num_threads;
+    
+    std::size_t data_size_per_thread = (size_t) dict.tokenCount() / config.num_threads;
     std::cout << "data size = " << data_size_per_thread << "/thread" << std::endl;
 
     for(std::size_t epoch = 0; epoch < config.max_epoch; ++epoch){
+      
       std::cout << "epoch " << epoch+1 << "/" << config.max_epoch << " start" << std::endl;
-        
+      
+      const unsigned int thread_seed = engine();
+
         // multi thread
         if(config.num_threads > 1){
             std::vector<std::thread> threads;
-            for(std::size_t i = 0; i < config.num_threads; ++i){
-              unsigned int thread_seed = engine();
-              train_thread(infile, w_u, w_v, dict, config, lr, 0, data_size_per_thread, thread_seed);
-              //threads.push_back(std::thread( [=, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed ]{ train_thread(infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed); }  ));
+            for(std::size_t i = 0; i < config.num_threads; ++i){    
+              threads.push_back(std::thread( [=, infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed, epoch ]() mutable { train_thread(infile, w_u, w_v, dict, config, lr, i, data_size_per_thread, thread_seed, epoch); }  ));
             }
             for(auto& th : threads){
               th.join();
             }
         // single thread
         } else{
-            const unsigned int thread_seed = engine();
-            train_thread(infile, w_u, w_v, dict, config, lr, 0, data_size_per_thread, thread_seed);
+            train_thread(infile, w_u, w_v, dict, config, lr, 0, data_size_per_thread, thread_seed, epoch);
         }
     }
 

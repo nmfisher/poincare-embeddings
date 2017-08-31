@@ -22,22 +22,26 @@
     
     std::size_t put(const key_type& key)
     {
-      auto itr = hash_.find(key);
-      if(itr == hash_.end()){
-        std::size_t n = size();
-        hash_.insert(std::make_pair(key, n));
-        keys_.push_back(key);
-        counts_.push_back(1);
+        auto itr = hash_.find(key);
+        if(itr == hash_.end()){
+            std::size_t n = size();
+            hash_.insert(std::make_pair(key, n));
+            keys_.push_back(key);
+            counts_.push_back(1);
+            ++ntokens_;
+            return n;
+        } 
+        std::size_t n = itr->second;
+        ++counts_[n];
+        ++ntokens_;
         return n;
-      }
-      std::size_t n = itr->second;
-      ++counts_[n];
-      ++ntokens_;
-      return n;
     }
     
-    std::size_t get_hash(const key_type& key) const {
-      return hash_.find(key)->second;
+    std::size_t get_hash(const key_type& key) {
+        if(!this->find(key)) {
+            this->put(key);
+        } 
+        return hash_.find(key)->second;      
     }
     
     key_type get_key(const std::size_t i) const { return keys_[i]; }
@@ -48,33 +52,35 @@
     
     const std::size_t& tokenCount() const { return ntokens_; } 
     
-    const bool readWord(std::istream& in, std::string& word) const
+    const bool readWord(std::istream& in, std::string& word) 
     {
         char c;
         std::streambuf& sb = *in.rdbuf();
         word.clear();
-        while ((c = sb.sbumpc()) && != EOF) {
-        if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\v' ||
-            c == '\f' || c == '\0') {
-          if (word.empty()) {
-            if (c == '\n') {
-              return true;
+        
+        while ((c = sb.sbumpc()) != std::char_traits<wchar_t>::eof()) {
+            if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\v' ||
+                c == '\f' || c == '\0') {
+                if (word.empty()) {
+                    if (c == '\n') {
+                        word += EOS;
+                        return true;
+                    }
+                    continue;
+                } else {
+                    if (c == '\n')
+                        sb.sungetc();
+                    return true;
+                }
             }
-            continue;
-          } else {
-            if (c == '\n')
-              sb.sungetc();
-            return true;
-          }
-        }
-        word.push_back(c);
+            word.push_back(c);
         }
         // trigger eofbit
         in.get();
         return !word.empty();
     }
 
-    const int32_t getLine(std::istream& in, std::vector<int32_t>& words) const {
+    const int32_t getLine(std::istream& in, std::vector<int32_t>& words) {
         std::uniform_real_distribution<> uniform(0, 1);
         
         if (in.eof()) {
@@ -99,7 +105,7 @@
     std::unordered_map<key_type, std::size_t> hash_;
     std::vector<key_type> keys_;
     std::vector<std::size_t> counts_;
-    std::size_t ntokens_;
+    std::size_t ntokens_ = 0;
   };
   
     inline bool build_dict(Dictionary<std::string>& dict, const std::string& filename, const Arguments& args)
