@@ -83,7 +83,7 @@ Arguments parse_args(int narg, char** argv)
     }else if(arg == "-w" || arg == "--window_size"){
       arg = argv[++i];
       int x = std::stod(arg);
-      if( x <= 0 ){ goto HELP; }
+      if( x < 0 ){ goto HELP; }
       result.ws = static_cast<int>(x);
       continue;
     }else if(arg == "-h" || arg == "--help"){
@@ -129,6 +129,7 @@ Arguments parse_args(int narg, char** argv)
     "    -l, --learning_rate_init  : float > 0 initial learning rate\n"
     "    -L, --learning_rate_final : float > 0 final learning rate\n"
     "    -v, --verbose             : int 0,1 verbosity \n"
+    "    -w, --window_size        : int >= 0 window size for CBOW"
             << std::endl;
   exit(0);
 }

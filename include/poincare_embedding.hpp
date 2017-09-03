@@ -75,10 +75,10 @@ namespace poincare_disc {
     
     // partial Euclidean derivative of dist(u,v) wrt u = (4  / (beta * sqrt(gamma^2 - 1))) * (((||v||^2 - 2<u,v> + 1)/alpha^2)))*u - v/alpha)
     // partial Euclidean derivative of dist(u,v) wrt v is the same with alphas/betas swapped
-    // Riemannian derivative is (A * Euclidean derivative),  where A is ((1 - ||x||^2)^2 / 4), the inverse of the Riemannian metric tensor)
-    void backward(Vector<real>& grad_u, Vector<real>& grad_v, real log_loss_grad)
+    // Riemannian derivative is (A * Euclidean derivative),  where A is ((1 - ||x||^2)^2 / 4), the inverse of the Riemannian metric tensor) - not shown here
+    void backward(Vector<real>& grad_u, Vector<real>& grad_v, real grad_output)
     {
-      real c = log_loss_grad;
+      real c = grad_output;
       
       if(gamma_ == 1){
         grad_u.zero_();
@@ -86,15 +86,15 @@ namespace poincare_disc {
         return;
       }
 
-      c *= 1 / std::sqrt(gamma_ * gamma_ - 1) / beta_ / alpha_;
-      real cu = c / alpha_; 
-      real cv = c / beta_;
+      c *= 4 / std::sqrt(gamma_ * gamma_ - 1);
+      real cu = c / beta_; 
+      real cv = c / alpha_;
   
-      grad_u.assign_(cu * (vv_ - 2 * uv_ + 1), u_);
-      grad_u.add_(-cu, v_);
+      grad_u.assign_(cu * (vv_ - 2 * uv_ + 1) / alpha_ / alpha_, u_);
+      grad_u.add_(-cu / alpha_, v_);
 
       grad_v.assign_(cv * (uu_ - 2 * uv_ + 1) / beta_ / beta_, v_);
-      grad_v.add_(-cv, u_);
+      grad_v.add_(-cv / beta_, u_);
       
     }
 
@@ -202,10 +202,10 @@ namespace poincare_disc {
     using real = RealType;
         
     // clip
-    // for(std::size_t i = 0, I = w_u.nrow(); i < I; ++i){
-      // clip(w_u[i]);
-      // clip(w_v[i]);
-    // }
+    for(std::size_t i = 0, I = w_u.nrow(); i < I; ++i){
+      clip(w_u[i]);
+      clip(w_v[i]);
+    }
 
 
     // construct negative sampler
@@ -232,7 +232,7 @@ namespace poincare_disc {
     // start training
     auto tick = std::chrono::system_clock::now();
     auto start_time = tick;
-    constexpr std::size_t progress_interval = 1000;
+    constexpr std::size_t progress_interval = 10000;
     
     double avg_loss = 0;
     double cum_loss = 0;
@@ -246,6 +246,8 @@ namespace poincare_disc {
     std::vector<int32_t> line;
     std::vector<int32_t> bow;
     std::string token;
+    
+    std::vector<real> exp_neg_dist_values(1 + config.neg_size);
         
     while (ifs.tellg() < end) {        
     
@@ -258,7 +260,12 @@ namespace poincare_disc {
                 auto tack = std::chrono::system_clock::now();
                 auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
                 tick = tack;
-                double percent = 100.0 * localTokenCount / token_count_per_thread;
+                double percent;
+                if(ifs.tellg() > end) {
+                    percent = 100.0;
+                } else {
+                    percent = 100.0 * localTokenCount / token_count_per_thread;
+                }
                 cum_loss += avg_loss;
                 std::cout << "\r"
                           <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
@@ -291,55 +298,66 @@ namespace poincare_disc {
             }
             
             v.mult_(1.0 / bow.size());
-                                                            
-            // calculate distances / sigmoids / log loss
-            loss = std::log(1 / (1 + std::exp(-dists[0](u, v))));
-                                    
-            for(std::size_t k = 1; k < config.neg_size; ++k){
-                loss += 1 / (1 + std::exp(-dists[k](u, w_v[negative_sampler()])));
-            }
-
             
-            loss /= config.neg_size;
-                                
-            // calculate grads
-            for(std::size_t k = 0; k < config.neg_size; ++k){
-                grads_u[k].zero_();
-                grads_v[k].zero_();
-                dists[k].backward(grads_u[k], grads_v[k], loss);
-            }
-    
-            // update
-            for(std::size_t k = 0; k < config.neg_size; ++k){
-                w_u[line[w]].add_clip_(-lr(), grads_u[k]);
-                for(std::size_t j = 0; j < bow.size(); ++j) {
-                    w_v[bow[j]].add_clip_(-lr(), grads_v[k]); 
-                }
+            // calculate exponentiated negative distances
+            exp_neg_dist_values[0] = std::exp(-dists[0](u, v));
+            double Z = 0.0;
+            for(std::size_t k = 1; k < config.neg_size+1; ++k){
+                exp_neg_dist_values[k] = std::exp(-dists[k](u, w_v[negative_sampler()]));
+                Z += exp_neg_dist_values[k];
             }            
+            
+            // explicitly calculate loss (display purposes only, not used in derivative)
+            loss = std::log(exp_neg_dist_values[0] / Z);
+            
+            // calculate Euclidean gradient vector 
+            dists[0].backward(grads_u[0], grads_v[0], 1.0);
+
+            for(std::size_t k = 1; k < config.neg_size+1; ++k){
+                dists[k].backward(grads_u[k], grads_v[k], 1.0);
+                grads_u[0].add_(-exp_neg_dist_values[k] / Z, grads_u[k]);
+            }
+            
+            // calculate Riemannian gradient vector
+            grads_u[0].mult_(std::pow(1 - u.squared_sum(), 2.0) / 4);
+            grads_v[0].mult_(std::pow(1 - v.squared_sum(), 2.0) / 4);
+    
+            // update u embeddings
+            w_u[line[w]].add_clip_(-lr(), grads_u[0]);
+            
+            // update v embeddings
+            for(std::size_t j = 0; j < bow.size(); ++j) {
+                w_v[bow[j]].add_clip_(-lr() / bow.size(), grads_v[0]); 
+            }
+            
+            // for(std::size_t k = 0; k < config.neg_size; ++k){
+                // w_u[line[w]].add_clip_(-lr(), grads_u[k]);
+                // for(std::size_t j = 0; j < bow.size(); ++j) {
+                    // w_v[bow[j]].add_clip_(-lr(), grads_v[k]); 
+                // }
+            // }            
             
             lr.update();
             avg_loss += loss;
-            
         }
     }
     
-    if(thread_no == 0){
-            auto tack = std::chrono::system_clock::now();
-            auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
-            tick = tack;
-            double percent = 100.0 * localTokenCount / token_count_per_thread;
-            cum_loss += avg_loss;
-            std::cout << "\r"
-                      <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
-                      << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec/thread"
-                      << "    " << "loss: " << avg_loss / progress_interval
-                      << "    " << "lr: " << lr()
-                      << "    " << "epoch: " << epoch << " / " << config.max_epoch 
-                      << std::flush;
+    if(thread_no == 0 && localTokenCount % progress_interval == 0){
+                auto tack = std::chrono::system_clock::now();
+                auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(tack-tick).count();
+                tick = tack;
+                double percent = 100.0;
+                cum_loss += avg_loss;
+                std::cout << "\r"
+                          <<std::setw(5) << std::fixed << std::setprecision(5) << percent << " %"
+                          << "    " << config.num_threads * progress_interval*1000./millisec << " tokens/sec/thread"
+                          << "    " << "loss: " << cum_loss / localTokenCount
+                          << "    " << "lr: " << lr()
+                          << "    " << "epoch: " << epoch << " / " << config.max_epoch 
+                          << std::flush;
 
-            avg_loss = 0;
-        }
-    
+                avg_loss = 0;
+            }    
     ifs.close();
 
     return true;
