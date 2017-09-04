@@ -1,5 +1,3 @@
-#include "poincare_embedding.hpp"
-
 using real = double;
 
 struct Arguments
@@ -16,7 +14,7 @@ struct Arguments
   real lr0 = 0.01;
   real lr1 = 0.0001;
   bool verbose = true;
-  
+  ModelType model = ModelType::CBOW;
 };
 
 Arguments parse_args(int narg, char** argv)
@@ -86,6 +84,17 @@ Arguments parse_args(int narg, char** argv)
       if( x < 0 ){ goto HELP; }
       result.ws = static_cast<int>(x);
       continue;
+    }else if(arg == "-m" || arg == "--model"){
+      arg = argv[++i];
+      if( !(arg == "cbow" || arg == "skipgram" )){ goto HELP; }
+      if(arg == "cbow") {
+        result.model = ModelType::CBOW;
+      } else if(arg =="skipgram") {
+        result.model = ModelType::SKIPGRAM;  
+      } else {
+          std::cerr << "Unrecognized model type." << std::endl;
+      }
+      continue;
     }else if(arg == "-h" || arg == "--help"){
       goto HELP;
     }
@@ -122,6 +131,7 @@ Arguments parse_args(int narg, char** argv)
     "    result_embeddng_file      : string    result file into which resulting embeddings are written\n"
     "    -s, --seed                : int >= 0   random seed\n"
     "    -t, --num_threads         : int > 0   number of threads\n"
+    "    -m, --model               : string    model name (\"cbow\" (default) or \"skipgram\")\n"
     "    -n, --neg_size            : int > 0   negativ sample size\n"
     "    -e, --max_epoch           : int > 0   maximum training epochs\n"
     "    -d, --dim                 : int > 0   dimension of embeddings\n"

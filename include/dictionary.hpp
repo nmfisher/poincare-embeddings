@@ -1,13 +1,10 @@
- namespace poincare_disc { 
+  namespace poincare_disc { 
 
  ///////////////////////////////////////////////////////////////////////////////////////////
   // Utilities
   ///////////////////////////////////////////////////////////////////////////////////////////
   
     const std::string EOS = "</s>";
-    const std::string BOW = "<";
-    const std::string EOW = ">";
-    const std::size_t MAX_LINE_SIZE = 1024;
     
   template <class KeyType>
   struct Dictionary

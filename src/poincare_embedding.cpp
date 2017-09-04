@@ -31,8 +31,8 @@ int main(int narg, char** argv)
   std::string data_file = args.data_file;
   std::string result_embedding_file = args.result_embedding_file;
 
-  Matrix<real> w_v;
-  Matrix<real> w_u;
+  Matrix<real> w_o; // w_v
+  Matrix<real> w_i; // w_u
   std::vector<std::pair<std::size_t, std::size_t> > data;
   Dictionary<std::string> dict;
   Config<real> config;
@@ -45,6 +45,7 @@ int main(int narg, char** argv)
   config.lr1 = args.lr1;
   config.ws = args.ws;
   config.initializer = UniformInitializer<real>(-args.uniform_range, args.uniform_range);
+  config.model = args.model;
 
   std::cout << "settings:" << "\n"
             << "  " << "data_file             : " << data_file << "\n"
@@ -58,6 +59,7 @@ int main(int narg, char** argv)
             << "  " << "lr0                   : " << config.lr0 << "\n"
             << "  " << "lr1                   : " << config.lr1 << "\n"
             << "  " << "uniform_range         : " << args.uniform_range << "\n"
+            << "  " << "model                 : "         << (config.model == ModelType::CBOW ? "CBOW" : "SKIPGRAM") << "\n"
             << std::endl;
 
   std::cout << "Creating token dictionary" << std::endl;
@@ -72,7 +74,7 @@ int main(int narg, char** argv)
   std::cout << "Done : " << dict.size() << " unique tokens." << std::endl;
 
   std::cout << "Starting training..." << std::endl;
-  ret = poincare_embedding<real>(data_file, w_u, w_v, dict, config);
+  ret = poincare_embedding<real>(data_file, w_i, w_o, dict, config);
 
   if(!ret){
     std::cerr << "training failed" << std::endl;
@@ -80,7 +82,7 @@ int main(int narg, char** argv)
   }
 
   std::cout << "save to " << result_embedding_file << std::endl;
-  save(result_embedding_file, w_v, dict);
+  save(result_embedding_file, w_i, dict);
 
   return 0;
 }
