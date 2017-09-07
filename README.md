@@ -8,6 +8,8 @@ I eventually plan to combine this with [Facebook's fastText](https://github.com/
 
 ## Build
 
+* gcc-4.6.3 / CMake 3 or newer.
+
 ```shell
 cd poincare-embedding
 mkdir work & cd work
@@ -20,6 +22,8 @@ make
 ```
 poincare-embedding/work/poincare-embedding [input_file] [output_file] -arg1 -arg2.....
 ```
+
+The executable accepts any text file consisting of words separated by a space (i.e. sentences). For each word in the text file, the Poincare model is then trained on a sliding window to the left and right of that word. The model will train across sentence boundaries (e.g. full-stops) but not across newlines.
 
 ## Arguments
 
@@ -38,3 +42,7 @@ result_embeddng_file      : string    result file into which resulting embedding
 -w, --window_size        : int >= 0 window size for CBOW```
 
 
+## References
+
+[Poincaré Embeddings for Learning Hierarchical Representations](https://arxiv.org/abs/1705.08039)
+[Neural Embeddings of Graphs in Hyperbolic Space](https://arxiv.org/abs/1705.10359)
