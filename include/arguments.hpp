@@ -10,6 +10,7 @@ struct Arguments
   std::size_t ws = 5;
   std::size_t max_epoch = 1;
   std::size_t dim = 50;
+  std::size_t threshold = 5;
   real uniform_range = 0.001;
   real lr0 = 0.01;
   real lr1 = 0.0001;
@@ -97,6 +98,12 @@ Arguments parse_args(int narg, char** argv)
       continue;
     }else if(arg == "-h" || arg == "--help"){
       goto HELP;
+    } else if(arg == "--threshold"){
+      arg = argv[++i];
+      int x = std::stod(arg);
+      if( x < 0 ){ goto HELP; }
+      result.threshold = static_cast<int>(x);
+      continue;
     }
 
     if(arg_count == 0){
@@ -139,7 +146,8 @@ Arguments parse_args(int narg, char** argv)
     "    -l, --learning_rate_init  : float > 0 initial learning rate\n"
     "    -L, --learning_rate_final : float > 0 final learning rate\n"
     "    -v, --verbose             : int 0,1 verbosity \n"
-    "    -w, --window_size        : int >= 0 window size for CBOW"
+    "    -w, --window_size         : int >= 0 window size for CBOW \n"
+    "    --threshold               : int >= 0 min threshold for words to appear in dict"
             << std::endl;
   exit(0);
 }

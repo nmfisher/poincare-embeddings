@@ -3,7 +3,6 @@
 typedef enum {CBOW=1, SKIPGRAM} ModelType;
 
 #include "arguments.hpp"
-
   
 template <class RealType>
   struct Config

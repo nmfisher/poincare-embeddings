@@ -4,7 +4,8 @@
   // Utilities
   ///////////////////////////////////////////////////////////////////////////////////////////
   
-    const std::string EOS = "</s>";
+  const std::string EOS = "</s>";
+  const std::string UNK = "<UNK>";
     
   template <class KeyType>
   struct Dictionary
@@ -12,7 +13,7 @@
   public:
     using key_type = KeyType;
   public:
-    Dictionary(): hash_(), keys_(), counts_() {}
+    Dictionary(): hash_(), keys_(), counts_() { }
     
     std::size_t size() const { return hash_.size(); }
     
@@ -40,6 +41,40 @@
             return &hash_.find(key)->second;          
         } 
         return nullptr;
+    }
+    
+    void threshold(size_t threshold, bool excludeFirst) {
+        size_t num_removed = 0;
+        key_type k;
+        size_t i;
+        if(excludeFirst) {
+            i = 1;
+        } else {
+            i = 0;
+        }
+
+        while(i < counts_.size()) {         
+            k = keys_[i];
+            if(counts_[i] < threshold) {
+                hash_.erase(k);
+                counts_.erase(counts_.begin() + i);
+                keys_.erase(keys_.begin() + i);
+                num_removed++;
+            } else {
+                auto it = hash_.find(k);
+                it->second = it->second - num_removed;
+                ++i;
+            }
+        }
+        keys_.shrink_to_fit();
+        counts_.shrink_to_fit();
+        
+        for(i = 0; i < counts_.size(); i++) {
+            k = keys_[i];
+            std::cout << k << std::endl;
+            std::cout << hash_.find(k)->second << std::endl;
+            std::cout << counts_[i] << std::endl;
+        }
     }
     
     key_type get_key(const std::size_t i) const { return keys_[i]; }
@@ -84,8 +119,11 @@
         std::string token;
         while (this->readWord(ifs, token) && token != EOS) {
             size_t* wid = get_hash(token);
+            ntokens++;
             if(wid) {
-                ntokens++;
+                words.push_back(*wid);       
+            } else {
+                wid = get_hash(UNK);
                 words.push_back(*wid);       
             }
         }
@@ -109,6 +147,7 @@
         
         std::string word;
         size_t ntokens_ = 0;
+        dict.put(UNK);
         while (dict.readWord(ifs, word)) {
             dict.put(word);
             if (ntokens_ % 1000000 == 0 && args.verbose == true) {
@@ -120,6 +159,8 @@
         ifs.close();
 
         std::cerr << std::endl;
+        
+        dict.threshold(args.threshold, true); // keep UNK
 
         return true;
     } 

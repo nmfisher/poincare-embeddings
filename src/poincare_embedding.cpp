@@ -59,6 +59,7 @@ int main(int narg, char** argv)
             << "  " << "lr0                   : " << config.lr0 << "\n"
             << "  " << "lr1                   : " << config.lr1 << "\n"
             << "  " << "uniform_range         : " << args.uniform_range << "\n"
+            << "  " << "threshold             : " << args.threshold << "\n"
             << "  " << "model                 : "         << (config.model == ModelType::CBOW ? "CBOW" : "SKIPGRAM") << "\n"
             << std::endl;
 
