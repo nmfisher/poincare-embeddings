@@ -6,6 +6,8 @@ This implementation allows training word embeddings on arbitrary text files usin
 
 I eventually plan to combine this with [Facebook's fastText](https://github.com/facebookresearch/fastText) (e.g. char-ngrams), but so far there have only been a few minor additions. 
 
+Gitter link: https://gitter.im/poincare-embeddings/Lobby
+
 ## Build
 
 * gcc-4.6.3 / CMake 3 or newer.
